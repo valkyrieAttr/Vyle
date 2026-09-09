@@ -10,16 +10,11 @@ Available Flags:
     --allow-debug           | Debug spit: set \$HYDE_TMQ_DEBUG=1 to enable verbose prints
     --allow-dry-run         | Dry-run: do not write files or execute RUN; just print actions
 
-    --env               P   | Enables sourcing of path file that contains exported variables.
-                              Requires additional delimiter '--' or else it will fallback.
-
-    --proc              N   | Amount of CPU cores to be utilized for template generation. Default: 1
-    --lock-timeout      N   | Seconds to wait for/make stale locks (sets \$HYDE_TMQ_LOCK_TIMEOUT). Default: 10
+    --env        [S:P|E:V]  | Enables sourcing of a path (S:) or exporting a variable (E:).
+                              Example: --env S: path/to/target E: foo=1
+                              
+    --proc             [N]  | Amount of CPU cores to be utilized for template generation. Default: 1
     
-    --run-concurrency   N   | Cap parallel post-scripts under --defer-run (sets
-                              \$HYDE_TMQ_RUN_CONCURRENCY). Default 1 = serial. 0 = fire-and-forget
-                              (nohup, detached, not waited on -- logs kept, not auto-cleaned)
-
     --header [T:P:R:B = V]  | Override template header parameters on the fly. Accepts colon-separated key:value pair
                               Example: --header T:"/tmp/out" R:"echo Done"
 
@@ -29,19 +24,26 @@ Available Flags:
                                     Example: --header B:- --args
                               If T: is uninitialized, then it will fallback to /dev/null.
 
-
+    --lock-timeout     [N]  | Seconds to wait for/make stale locks (sets \$HYDE_TMQ_LOCK_TIMEOUT). Default: 10
+    
+    --run-concurrency  [N]  | Cap parallel post-scripts under --defer-run (sets
+                              \$HYDE_TMQ_RUN_CONCURRENCY). Default 1 = serial. 0 = fire-and-forget
+                              (nohup, detached, not waited on -- logs kept, not auto-cleaned)
+    
     --help                  | Show this help
     --file                  | Target path: path/to/template | path/to/dir..
     --dont-run              | Disable RUN execution (sets \$HYDE_TMQ_ALLOW_RUN=0)
+    
+    --pre-scan              | Pre-scan template file to avoid per-worker duplicate PRE invocation.
+                              Runs unique PRE hooks once in parent and exports results to children
+
+    --no-atomic             | Disable atomic writing (fsync/temp files) for faster direct writes while keeping locks.
 
     --defer-run             | Defer RUN/post-scripts: workers queue them instead of running them;
                               parent executes the queue after all workers finish (sets
                               \$HYDE_TMQ_DEFER_RUN=1)
 
-    --pre-scan              | Pre-scan template file to avoid per-worker duplicate PRE invocation.
-                              Runs unique PRE hooks once in parent and exports results to children
-
-    --no-atomic             | Disable atomic writing (fsync/temp files) for faster direct writes while keeping locks.
+    --compat-hyde           | Allow $ or \${} variables in template headers/hooks and disable <> in headers.
 
     --ignore-unbound        | Treat all <...> as literal markup, not placeholders: unbound plain
                               <VAR> is left as-is with no warning. Useful for large hand-authored
@@ -62,16 +64,45 @@ while [[ $# -gt 0 ]]; do
     --env)
         shift
         set -a
+        env_mode=""
         while [[ "$#" -gt 0 && "$1" != "--" && "$1" != -* ]]; do
-            if [[ -z "${1:-}" || ! -e "${1}" ]]; then
-                printf '@[diagnostic:error(true)]: --env requires a valid path! \n' >&2
-                exit 2
-            fi
-            source "$1"
+            case "$1" in
+            "E:")
+                env_mode="E"
+                ;;
+            E:*)
+                env_mode="E"
+                export "${1#E:}"
+                ;;
+            "S:")
+                env_mode="S"
+                ;;
+            S:*)
+                env_mode="S"
+                if [[ ! -e "${1#S:}" || -z "${1#S:}" ]]; then
+                    printf '@[diagnostic:error(true)]: --env S: requires a valid file path (e.g., S: /path/to/target)\n' >&2
+                    exit 2
+                fi
+                source "${1#S:}"
+                ;;
+            *)
+                if [[ "$env_mode" == "E" ]]; then
+                    export "$1"
+                elif [[ "$env_mode" == "S" ]]; then
+                    if [[ ! -e "$1" ]]; then
+                        printf '@[diagnostic:error(true)]: --env chained path "%s" does not exist\n' "$1" >&2
+                        exit 2
+                    fi
+                    source "$1"
+                else
+                    printf '@[diagnostic:error(true)]: --env arguments must begin with a valid S: or E: prefix\n' >&2
+                    exit 2
+                fi
+                ;;
+            esac
             shift
         done
         set +a
-        [[ "${1:-}" == "--" ]] && shift
         continue
         ;;
     --proc)
@@ -81,22 +112,6 @@ while [[ $# -gt 0 ]]; do
             exit 2
         fi
         export HYDE_TMQ_PROC=$1
-        ;;
-    --lock-timeout)
-        shift
-        if [[ -z "${1:-}" || ! "$1" =~ ^[0-9]+$ ]]; then
-            printf '@[diagnostic:error(true)]: --lock-timeout requires a positive integer argument\n' >&2
-            exit 2
-        fi
-        export HYDE_TMQ_LOCK_TIMEOUT="$1"
-        ;;
-    --run-concurrency)
-        shift
-        if [[ -z "${1:-}" || ! "${1}" =~ ^[0-9]+$ ]]; then
-            printf '@[diagnostic:error(true)]: --run-concurrency requires a non-negative integer argument\n' >&2
-            exit 2
-        fi
-        export HYDE_TMQ_RUN_CONCURRENCY="$1"
         ;;
 
     --header)
@@ -129,6 +144,22 @@ while [[ $# -gt 0 ]]; do
         done
         continue
         ;;
+    --lock-timeout)
+        shift
+        if [[ -z "${1:-}" || ! "$1" =~ ^[0-9]+$ ]]; then
+            printf '@[diagnostic:error(true)]: --lock-timeout requires a positive integer argument\n' >&2
+            exit 2
+        fi
+        export HYDE_TMQ_LOCK_TIMEOUT="$1"
+        ;;
+    --run-concurrency)
+        shift
+        if [[ -z "${1:-}" || ! "${1}" =~ ^[0-9]+$ ]]; then
+            printf '@[diagnostic:error(true)]: --run-concurrency requires a non-negative integer argument\n' >&2
+            exit 2
+        fi
+        export HYDE_TMQ_RUN_CONCURRENCY="$1"
+        ;;
     --help)
         help_function
         exit 0
@@ -142,10 +173,11 @@ while [[ $# -gt 0 ]]; do
         export HYDE_TMQ_TEMPLATE_FILE
         continue
         ;;
-    --defer-run) export HYDE_TMQ_DEFER_RUN=1 ;;
     --dont-run) export HYDE_TMQ_ALLOW_RUN=0 ;;
     --pre-scan) export HYDE_TMQ_PRE_SCAN=1 ;;
     --no-atomic) export HYDE_TMQ_NO_ATOMIC=1 ;;
+    --defer-run) export HYDE_TMQ_DEFER_RUN=1 ;;
+    --compat-hyde) export HYDE_TMQ_COMPAT_HYDE=1 ;;
     --ignore-unbound) export HYDE_TMQ_IGNORE_UNBOUND=1 ;;
     --disable-fallback) export HYDE_TMQ_DISABLE_FALLBACK=1 ;;
     --ignore-templates)
@@ -161,6 +193,18 @@ while [[ $# -gt 0 ]]; do
     esac
     shift
 done
+
+# Any remaining positional arguments are trailing Directory/File paths per
+# the documented usage ("hyir.sh [Flags] [Directory/Files]"). Fold them into
+# the same colon-joined list --file builds, so plain positional invocation
+# works the same as passing --file explicitly.
+if [[ $# -gt 0 ]]; then
+    for _hyde_tmq_pos_arg in "$@"; do
+        HYDE_TMQ_TEMPLATE_FILE="${HYDE_TMQ_TEMPLATE_FILE:+$HYDE_TMQ_TEMPLATE_FILE:}$_hyde_tmq_pos_arg"
+    done
+    unset _hyde_tmq_pos_arg
+    export HYDE_TMQ_TEMPLATE_FILE
+fi
 
 if [[ -n "$HYDE_TMQ_HEADER_INIT" && "$HYDE_TMQ_HEADER_INIT" == 1 ]]; then
     if [[ -z "$HYDE_TMQ_HEADER_BUFFER" ]]; then
@@ -222,7 +266,7 @@ export LIB_DIR="$scrDir"
 [[ -n "${XDG_CONFIG_HOME:-}" ]] && export XDG_CONFIG_HOME
 
 export SCRIPT_NAME="$0"
-export HYDE_TMQ_LOCK_DIR="${HYDE_RUNTIME_DIR:-${XDG_RUNTIME_DIR:-/run/user/$(id -u)}/hyde}/$(basename -- "$0" ".*")"
+export HYDE_TMQ_LOCK_DIR="${HYDE_RUNTIME_DIR:-${XDG_RUNTIME_DIR:-/run/user/$(id -u)}/hyde}/$(basename -- "${BASH_SOURCE[0]}" ".*")"
 export HYDE_TMQ_LOCK_TIMEOUT="${HYDE_TMQ_LOCK_TIMEOUT:-10}"
 
 perl - "$@" <<'EOF'
@@ -285,8 +329,7 @@ my $ALLOW_PRE_SCAN = $ENV{HYDE_TMQ_PRE_SCAN}
     && $ENV{HYDE_TMQ_PRE_SCAN} =~ /^(1|true|yes)$/i ? 1 : 0;
 
 # Ignore-unbound: treat <...> as literal markup rather than placeholders.
-# Unbound plain <VAR> is left as-is with no warning; any :- fallback syntax
-# found in a template is a hard error (fallback parsing is disabled outright).
+# Unbound plain <VAR> is left as-is with no warning;
 # --allow-warn (strict) takes precedence if both are set.
 my $IGNORE_UNBOUND
     = $ENV{HYDE_TMQ_IGNORE_UNBOUND}
@@ -303,16 +346,14 @@ my $DISABLE_FALLBACK = $ENV{HYDE_TMQ_DISABLE_FALLBACK}
 my $DEFER_RUN = $ENV{HYDE_TMQ_DEFER_RUN}
     && $ENV{HYDE_TMQ_DEFER_RUN} =~ /^(1|true|yes)$/i ? 1 : 0;
 
-# Run-concurrency: how the parent drains the deferred queue.
-#   1 (default/unset) = serial, one post-script at a time (safe, predictable)
-#   >1                = bounded fork pool of that size
-#   0                 = fire-and-forget background mode (nohup, detached;
-#                        the parent does not wait and cannot know success)
 my $RUN_CONCURRENCY
     = defined $ENV{HYDE_TMQ_RUN_CONCURRENCY}
     && $ENV{HYDE_TMQ_RUN_CONCURRENCY} =~ /^\d+$/
     ? int( $ENV{HYDE_TMQ_RUN_CONCURRENCY} )
     : 1;
+
+# Compat-HyDE: Enable ${} signatures 
+my $COMPAT_HYDE = $ENV{HYDE_TMQ_COMPAT_HYDE} && $ENV{HYDE_TMQ_COMPAT_HYDE} =~ /^(1|true|yes)$/i ? 1 : 0;
 
 for my $path (@INPUT_PATH) {
     if ( -f $path ) {
@@ -361,10 +402,17 @@ if ($DEFER_RUN) {
         "@[diagnostic:error:populate:write(false)]: Cannot create queue dir $queue_dir: $!";
 }
 
+
 # more permissive placeholder regex; captures color functions or simple names
 # Allows a nested placeholder inside the fallback (e.g., <VAR:-<DEFAULT>>)
 $PLACEHOLDER_RE
     = qr{<\s*(?:(\w+_rgba)\(\s*([^)]+)\s*\)|([\w-]+))\s*(?::-((?:<[^>]*>|[^>])+))?\s*>}x;
+
+my $nested_content 
+    = qr/(?: [^{}]++ | \{ (?: [^{}]++ | (?&HYIR_NEST) )* \} )*(?(DEFINE)(?<HYIR_NEST>\{ (?: [^{}]++ | (?&HYIR_NEST) )* \}))/x;
+
+my $DOLLAR_RE 
+    = qr{\$([a-zA-Z_]\w*)|\$\{\s*(?:(\w+)\(\s*([^)]+)\s*\)|([a-zA-Z_]\w*))\s*(?::-($nested_content))?\s*\}}x;
 
 # sanitize environment: trim whitespace and escape quotes, but do not delete variables like PATH/HOME
 sub sanitize_env {
@@ -612,6 +660,21 @@ sub direct_write_to_target {
     rename_tmp_to_target( $tmp, $target );
 }
 
+sub decode_escapes {
+    my ($str) = @_;
+    return '' unless defined $str;
+    
+    $str =~ s/\\([nrt0\\])/
+        $1 eq 'n' ? "\n" :
+        $1 eq 'r' ? "\r" :
+        $1 eq 't' ? "\t" :
+        $1 eq '0' ? "\0" :
+        $1        # '\\' remains '\'
+    /ge;
+    
+    return $str;
+}
+
 %SKIP_SET = map { $_ => 1 } (
     $ENV{HYDE_TMQ_IGNORE_TEMPLATES}
     ? split /\s+/,
@@ -619,11 +682,13 @@ sub direct_write_to_target {
     : ()
 );
 
+
+my $braces = qr/\{.*?\}(?=;|\|\s*\$(?:RUN|PRE):)/s;
 sub process_template {
     my ($template_file) = @_;
 
     if ($template_file eq '::BUFFER::') {
-        $raw = $ENV{HYDE_TMQ_HEADER_BUFFER};
+        $raw = decode_escapes($ENV{HYDE_TMQ_HEADER_BUFFER});
     }
     else {
         return unless -f $template_file;
@@ -644,17 +709,38 @@ sub process_template {
                     "@[diagnostic:arg:ignore_unbound(true)]: $template_file uses :- fallback syntax, which is disabled under --disable-fallback\n";
             }
         }
+
+        if ($COMPAT_HYDE) {
+            while ( $raw =~ /$DOLLAR_RE/g ) {
+                if ( defined $5 ) {
+                    die
+                        "@[diagnostic:arg:ignore_unbound(true)]: $template_file uses \${...:-...} fallback syntax, which is disable under --disable-fallback \n";
+                }
+            }
+        }
+    }
+    
+    if ( $raw =~ /^(?<header>.*?(?:\|\s*\$(?:PRE|RUN):\s*(?:$braces|[^\n]*?(?=\|\s*\$(?:PRE|RUN):|\n|$)))+\s*?;?\s*?(?:\n|$))(?<body>.*)$/s) {
+        $header = $+{header};
+        $body = $+{body};
     }
 
-    $nl     = index( $raw, "\n" );
-    $header = $nl >= 0 ? substr( $raw, 0, $nl ) : $raw;
+    else {
+        $nl     = index( $raw, "\n" );
+        $header = $nl >= 0 ? substr( $raw, 0, $nl ) : $raw;
+        $body = $nl >= 0 ? substr( $raw, $nl + 1 ) : '';
+
+        if ( $header =~ /\|\s*\$(?:PRE|RUN):\s*\{/ ) {
+            die "@[diagnostic:error:syntax(true)]: Hanging '{' detected in header of $template_file... Missing closing '}'\n";
+        }
+    }
 
     my $has_hooks = ( index( $header, '|' ) >= 0 );
 
-    $body = $nl >= 0 ? substr( $raw, $nl + 1 ) : '';
     $header =~ s/^\s+|\s+$//g;
 
     my $replacer;
+    my $dollar_replacer;
     $replacer = sub {
         my ( $rgba_base, $rgba_args, $var_name, $fallback ) = @_;
 
@@ -715,25 +801,79 @@ sub process_template {
         }
     };
 
+    our $IS_HOOK_CONTEXT = 0;
+    $dollar_replacer = sub {
+        my ($var_bare, $func_base, $func_args, $var_brace, $fallback) = @_;
+        my $var_name = $var_bare // $var_brace // $func_base;
+
+        my $resolve_fallback = sub {
+            my ($fb) = @_;
+            return undef unless defined $fb;
+            $fb =~ s/^\s+|\s+$//g;
+            $fb =~ s{$DOLLAR_RE}{$dollar_replacer->($1, $2, $3, $4, $5)}ge;
+            return length($fb) ? $fb : undef;
+        };
+
+        if ( defined $func_base ) {
+            return "$RGBA_BASE{$func_base}$func_args)"
+                if exists $RGBA_BASE{$func_base};
+        }
+        else {
+            return $REPLACE{$var_name} if exists $REPLACE{$var_name};
+        }
+
+        my $fb_val = $resolve_fallback->($fallback);
+        return $fb_val if defined $fb_val;
+
+        my $orig;
+        $orig = "\$$var_bare" if defined $var_bare;
+        $orig = "\${$func_base($func_args)" . (defined $fallback ? ":-$fallback" : "") . "}" 
+            if defined $func_base;
+        $orig = "\${$var_brace" . (defined $fallback ? ":-$fallback" : "") . "}" 
+            if !defined $var_bare;
+
+        my $safe_orig = $IS_HOOK_CONTEXT ? "\\$orig" : $orig;
+        return $safe_orig if $IGNORE_UNBOUND;
+
+        if ($ALLOW_STRICT_WARNINGS) {
+            die 
+                "@[diagnostic:arg:strict_warn(true)]: Unbound variables $orig in $template_file \n";
+        } else {
+            warn 
+                "@[diagnostic:warn(true)]: Unbound variables $orig in $template_file; leaving as placeholders\n"
+                unless $warned_unbound{"$orig\0$template_file"}++;
+            return $orig;
+        }
+    };
+
     ( $target, $pre_script, $post_script, $post_is_run )
         = ( '', '', '', 0 );
 
-    if ($has_hooks) {
+    if ($has_hooks && $template_file ne '::BUFFER::') {
         if ( $header
-            =~ s/\|\s*\$PRE:(.*?)(?=\|\s*\$(?:RUN|PRE):|$)//s )
+            =~ s/\|\s*\$PRE:\s*($braces|.*?);?(?=\s*\||$)//s )
         {
             $pre_script = $1;
             $pre_script =~ s/^\s+|\s+$//g;
+
+            $pre_script =~ s/^\s*\{\s*//;
+            $pre_script =~ s/\s*\}\s*;?\s*$//;
         }
 
         if ( $header =~ s/\|\s*\$RUN:(.*)$//s ) {
             $post_script = $1;
             $post_is_run = 1;
             $post_script =~ s/^\s+|\s+$//g;
+
+            $post_script =~ s/^\s*\{\s*//;
+            $post_script =~ s/\s*\}\s*;?\s*$//;
         }
         elsif ( $header =~ s/\|(.*)$//s ) {
             $post_script = $1;
             $post_script =~ s/^\s+|\s+$//g;
+
+            $post_script =~ s/^\s*\{\s*//;
+            $post_script =~ s/\s*\}\s*;?\s*$//;
         }
 
         # Whatever remains before the first pipe is the target
@@ -773,13 +913,26 @@ sub process_template {
 
     # Execute Pre-Hook (only if allowed via HYDE_TMQ_ALLOW_PRE)
     if ($pre_script) {
-        $pre_script
-            =~ s{$PLACEHOLDER_RE}{$replacer->($1, $2, $3, $4)}ge
-            if $pre_script =~ /[<>()]/;
+        if ($COMPAT_HYDE) {
+            die 
+                "@[diagnostic:error:compat_hyde(true)]: Pre-hook cannot contain have <> when --compat-hyde is passed as an argument. \n" 
+                if $target =~ /$PLACEHOLDER_RE/;
+            {
+                local $IS_HOOK_CONTEXT = 1;
+                $pre_script =~ s{$DOLLAR_RE}{$dollar_replacer->($1, $2, $3, $4, $5)}ge 
+                    if $pre_script =~ /\$/;
+            }
+
+        }
+        else {
+            $pre_script =~ s{$PLACEHOLDER_RE}{$replacer->($1, $2, $3, $4)}ge
+                if $pre_script =~ /[<>()]/;
+        }
 
         unless ( $ENV{HYDE_TMQ_PRE_SCAN_RAN} ) {
             import_shell_env($pre_script);
         }
+
         else {
             warn
                 "@[diagnostic:warn:arg:pre_scan(true) - Prescan already ran; skipping PRE for $template_file\n]"
@@ -788,17 +941,39 @@ sub process_template {
     }
 
     # Substitute placeholders in target, post_script, and body
-    $target =~ s{$PLACEHOLDER_RE}{$replacer->($1, $2, $3, $4)}ge
-        if $target && $target =~ /[<>()]/;
+    if ($target) {
+        if ($COMPAT_HYDE) {
+            die 
+                "@[diagnostic:error:compat_hyde(true)]: Header <target> cannot have <VAR> syntax when --compat-hyde is passed as an argument. \n"
+                if $target =~ /$PLACEHOLDER_RE/;
+            
+            $target =~ s{$DOLLAR_RE}{$dollar_replacer->($1, $2, $3, $4, $5)}ge 
+                    if $target =~ /\$/;
+        } else {
+            $target =~ s{$PLACEHOLDER_RE}{$replacer->($1, $2, $3, $4)}ge
+                if $target && $target =~ /[<>()]/;
+        }
+    }
 
-    $post_script =~ s{$PLACEHOLDER_RE}{$replacer->($1, $2, $3, $4)}ge
-        if $post_script && $post_script =~ /[<>()]/;
+    if ($post_script) {
+        if ($COMPAT_HYDE) {
+            die 
+                "@[diagnostic:error:compat_hyde(true)]: Header RUN: hook cannot have <VAR> syntax when --compat-hyde is passed as an argument. \n"
+                if $post_script =~ /$PLACEHOLDER_RE/;
+            {
+                local $IS_HOOK_CONTEXT = 1;
+                $post_script =~ s{$DOLLAR_RE}{$dollar_replacer->($1, $2, $3, $4, $5)}ge 
+                    if $post_script =~ /\$/;
+            }
+        } else {
+            $post_script =~ s{$PLACEHOLDER_RE}{$replacer->($1, $2, $3, $4)}ge
+                if $post_script && $post_script =~ /[<>()]/;
+        }
+    }
 
     $body =~ s{$PLACEHOLDER_RE}{$replacer->($1, $2, $3, $4)}ge
         if $body && $body =~ /[<>()]/;
 
-    # Ensure we have a concrete target path before attempting to write.
-    # If templates are intended to produce stdout or similar, change this behavior.
     unless ( defined $target && length $target ) {
         print
             "@[arg:empty_path(true)] No target specified in $template_file; skipping\n"
@@ -1082,10 +1257,9 @@ sub execute_post_script_background {
         return;
     }
 
-    my $log = "$locks_base/nohup.out"; 
-    ( my $log_q = $log ) =~ s/'/'\\''/g;
+    my $log = "$ENV{HYDE_TMQ_LOCK_DIR}/nohup.out"; 
 
-    system("nohup $cmd >>'$log_q' 2>&1 &");
+    system("nohup $cmd >>'$log' 2>&1 &");
 
     warn
         "@[defer_run:background(true)]: Backgrounded post-script from $source (log: $log)\n"
@@ -1146,24 +1320,46 @@ if ($ALLOW_PRE_SCAN) {
         my $hdr = "";
 
         if ($f eq '::BUFFER::') {
-            my $raw_buf = $ENV{HYDE_TMQ_HEADER_BUFFER};
-            my $nl_idx = index($raw_buf, "\n");
-            $hdr = $nl_idx >= 0 ? substr($raw_buf, 0, $nl_idx) : $raw_buf;
+            my $raw_buf = decode_escapes($ENV{HYDE_TMQ_HEADER_BUFFER});
+
+            if ($raw_buf =~ /^(?<header>.*?(?:\|\s*\$(?:PRE|RUN):\s*(?:$braces|[^\n]*?(?=\|\s*\$(?:PRE|RUN):|\n|$)))+\s*?;?\s*?(?:\n|$))(?<body>.*)$/s) {
+                $hdr = $+{header};
+            } else {
+                my $nl_idx = index($raw_buf, "\n");
+                $hdr = $nl_idx >= 0 ? substr($raw_buf, 0, $nl_idx) : $raw_buf;
+                
+                if ( $hdr =~ /\|\s*\$(?:PRE|RUN):\s*\{/ ) {
+                    die "@[diagnostic:error:syntax(true)]: Hanging '{' detected ... Missing closing '}'\n";
+
+                }
+            }
+
             $hdr =~ s/^\s+|\s+$//g;
         }
         else {
             next unless -f $f;
             if ( open my $fh, '<', $f ) {
-                $hdr = <$fh> // "";
+                local $/;
+                my $full_raw = <$fh> // "";
                 close $fh;
+
+                if ($full_raw =~ /^(?<header>.*?(?:\|\s*\$(?:PRE|RUN):\s*(?:$braces|[^\n]*?(?=\|\s*\$(?:PRE|RUN):|\n|$)))+\s*?;?\s*?(?:\n|$))(?<body>.*)$/s) {
+                    $hdr = $+{header};
+                } else {
+                    my $nl_idx = index($full_raw, "\n");
+                    $hdr = $nl_idx >= 0 ? substr($full_raw, 0, $nl_idx) : $full_raw;
+                }
                 $hdr =~ s/^\s+|\s+$//g;
             }
         }
 
         my $pre = "";
-        if ( $hdr =~ /\|\s*\$PRE:(.*?)(?=\|\s*\$(?:RUN|PRE):|$)/s ) {
+        if ( $hdr =~ /\|\s*\$PRE:\s*($braces|.*?);?(?=\s*\||$)/s ) {
             $pre = $1;
             $pre =~ s/^\s+|\s+$//g;
+
+            $pre =~ s/^\s*\{\s*//;
+            $pre =~ s/\s*\}\s*;?\s*$//;
         }
 
         next unless $pre;
