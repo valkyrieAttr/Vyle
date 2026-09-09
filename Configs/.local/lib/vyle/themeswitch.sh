@@ -4,46 +4,32 @@ set -eo pipefail
 scrDir="$(dirname "$(realpath "$0")")"
 source "${scrDir}/globalcontrol.sh"
 
-lockFile="${XDG_RUNTIME_DIR}/${0##*/}.lock"
-if [ -e "${lockFile}" ]; then
-    cat <<EOF
-Error: Another instance of ${0##*/} is running.
-If you are sure that no other instance of ${0##*/} running, then remove the lock file:
-    $lockFile
-EOF
-    notify-send -a "t2" -r 91190 -t 800 -i "${dunstDir}/icons/hyprdots.svg" "Vyle" "Another instance of ${0##*/} is running."
-    exit 0
-fi
-
-touch "${lockFile}"
-trap 'rm -f ${lockFile}' EXIT
-
 show_theme_status() {
     cat <<EOF
- :: Current theme: $VYLE_RESERVED_THEME
- :: Cursor theme: $HYPRLAND_CURSOR_THEME
- :: Cursor size: $HYPRLAND_CURSOR_SIZE
- :: Terminal: $HYPRLAND_TERMINAL
- :: Font: $GTK_FONT_NAME
- :: Font size: $GTK_FONT_SIZE
- :: Document font: $GTK_DOCUMENT_FONT
- :: Document font size: $GTK_DOCUMENT_FONT_SIZE
- :: Monospace font: $GTK_MONOSPACE_FONT
- :: Monospace font size: $GTK_MONOSPACE_FONT_SIZE
- ::
- :: Selected theme: $thmChsh
- :: Wallpaper: ${thmImg##*/}
- :: Wallpaper Backend: $WALLPAPER_CONFIGURATION_BACKEND
- :: Framerate: ${WALLPAPER_SWWW_FRAMERATE}
- :: Duration: ${WALLPAPER_SWWW_TRANSITION_DURATION}
- :: Bezier: ${WALLPAPER_SWWW_TRANSITION_BEZIER}
- :: Animation: {
- ::    Transition Previous: ${WALLPAPER_SWWW_ANIMATION_PREVIOUS}
- ::    Transition Next: ${WALLPAPER_SWWW_ANIMATION_NEXT}
- ::    Transition Theme: ${WALLPAPER_SWWW_ANIMATION_THEME}
- :: }
- :: Custom Paths: [${wallAddCustomPath}]
- ::
+Current theme: $VYLE_RESERVED_THEME
+Cursor theme: $HYPRLAND_CURSOR_THEME
+Cursor size: $HYPRLAND_CURSOR_SIZE
+Terminal: $HYPRLAND_TERMINAL
+Font: $GTK_FONT_NAME
+Font size: $GTK_FONT_SIZE
+Document font: $GTK_DOCUMENT_FONT
+Document font size: $GTK_DOCUMENT_FONT_SIZE
+Monospace font: $GTK_MONOSPACE_FONT
+Monospace font size: $GTK_MONOSPACE_FONT_SIZE
+
+Selected theme: $thmChsh
+Wallpaper: ${thmImg##*/}
+Wallpaper Backend: $WALLPAPER_CONFIGURATION_BACKEND
+Framerate: ${WALLPAPER_SWWW_FRAMERATE}
+Duration: ${WALLPAPER_SWWW_TRANSITION_DURATION}
+Bezier: ${WALLPAPER_SWWW_TRANSITION_BEZIER}
+Animation: {
+   Transition Previous: ${WALLPAPER_SWWW_ANIMATION_PREVIOUS}
+   Transition Next: ${WALLPAPER_SWWW_ANIMATION_NEXT}
+   Transition Theme: ${WALLPAPER_SWWW_ANIMATION_THEME}
+}
+Custom Paths: [${wallAddCustomPath}]
+
 EOF
 }
 
@@ -75,13 +61,13 @@ themeSelTui() {
             setConf "VYLE_RESERVED_THEME" "${thmChsh}" "${VYLE_STATE_HOME}/staterc"
         fi
         if [[ "${VYLE_WALLPAPER_DIRECTORY}" != "${themeDir}/${thmChsh}/wallpapers" ]]; then
-            echo " :: Theme Control - Theme '${thmChsh}' :: Wallpaper '${thmImg}' :: DcolMode '${WALLBASH_MODE}' --> '${XDG_CONFIG_HOME}'"
+            echo "Theme Control - Theme '${thmChsh}' :: Wallpaper '${thmImg}' :: DcolMode '${WALLBASH_MODE}' --> '${XDG_CONFIG_HOME}'"
             THEME_IMAGE_NO_EXTN="${thmImg##*/}"
             THEME_IMAGE_NO_EXTN="${THEME_IMAGE_NO_EXTN%.*}"
             notify -m 2 -i "theme_engine" -p "${thmChsh}" -s "${VYLE_CACHE_HOME}/thmb/${THEME_IMAGE_NO_EXTN}.thmb" -t 1100 -a "t1"
             setConf "VYLE_WALLPAPER_DIRECTORY" "${themeDir}/${thmChsh}/wallpapers" "${VYLE_STATE_HOME}/staterc"
         else
-            echo -e " :: Theme Control - Skipped populating $thmChsh -> ${XDG_CONFIG_HOME}"
+            echo -e "Theme Control - Skipped populating $thmChsh -> ${XDG_CONFIG_HOME}"
             exit 0
         fi
         if [[ "${WALLBASH_MODE}" -eq 3 ]]; then
@@ -90,7 +76,7 @@ themeSelTui() {
             fi
             sed -i 's|^[[:space:]]*source[[:space:]]*=[[:space:]]* \$XDG_CONFIG_HOME/hypr/themes/wallbash.conf|#source = \$XDG_CONFIG_HOME/hypr/themes/wallbash.conf|' "${VYLE_DATA_HOME}/hypr/dynamic.conf"
         else
-            "${scrDir}/tmq.write.sh" \
+            "${scrDir}/hyir.sh" \
                 --file "${themeDir}/${thmChsh}/hypr.theme" \
                 --proc "${VYLE_CONFIGURATION_CORE}" \
                 --no-atomic \
@@ -106,7 +92,7 @@ themeSelTui() {
             return 1
         }
         "${scrDir}/swwwallswitch.sh" -t -i "${thmImg}" -w --swww-t -n
-        echo -e " :: Theme Control - Populated successfully ${thmChsh} -> ${XDG_CONFIG_HOME}" &
+        echo -e "Theme Control - Populated successfully ${thmChsh} -> ${XDG_CONFIG_HOME}" &
     fi
 }
 
