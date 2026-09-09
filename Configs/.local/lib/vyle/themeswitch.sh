@@ -90,7 +90,7 @@ themeSelTui() {
             fi
             sed -i 's|^[[:space:]]*source[[:space:]]*=[[:space:]]* \$XDG_CONFIG_HOME/hypr/themes/wallbash.conf|#source = \$XDG_CONFIG_HOME/hypr/themes/wallbash.conf|' "${VYLE_DATA_HOME}/hypr/dynamic.conf"
         else
-            "${scrDir}/hyir.sh" \
+            "${scrDir}/tmq.write.sh" \
                 --file "${themeDir}/${thmChsh}/hypr.theme" \
                 --proc "${VYLE_CONFIGURATION_CORE}" \
                 --no-atomic \
