@@ -154,7 +154,7 @@ Wall_Switch() {
     export VYLE_CURRENT_IMAGE=$VYLE_IMAGE_SOURCE
     export HYDE_TMQ_IGNORE_TEMPLATES="${VYLE_CONFIGURATION_SKIP_TEMPLATE}"
 
-    source "${scrDir}/hyir.sh" \
+    source "${scrDir}/tmq.write.sh" \
         --file "${POPULATE[@]}" \
         --proc "${VYLE_CONFIGURATION_CORE}" \
         --no-atomic \
