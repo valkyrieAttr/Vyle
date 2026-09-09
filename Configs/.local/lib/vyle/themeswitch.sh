@@ -4,6 +4,20 @@ set -eo pipefail
 scrDir="$(dirname "$(realpath "$0")")"
 source "${scrDir}/globalcontrol.sh"
 
+lockFile="${XDG_RUNTIME_DIR}/${0##*/}.lock"
+if [ -e "${lockFile}" ]; then
+    cat <<EOF
+Error: Another instance of ${0##*/} is running.
+If you are sure that no other instance of ${0##*/} running, then remove the lock file:
+    $lockFile
+EOF
+    notify-send -a "t2" -r 91190 -t 800 -i "${dunstDir}/icons/hyprdots.svg" "Vyle" "Another instance of ${0##*/} is running."
+    exit 0
+fi
+
+touch "${lockFile}"
+trap 'rm -f ${lockFile}' EXIT
+
 show_theme_status() {
     cat <<EOF
 Current theme: $VYLE_RESERVED_THEME
