@@ -69,7 +69,7 @@ while true; do
                 "Configuration has been reloaded." >&2)
 
             "${scrDir}/wallbashdunst.sh"
-            "${scrDir}/hyir.sh" \
+            "${scrDir}/tmq.write.sh" \
                 --file "${VYLE_DATA_HOME}/wallbash/variables.dcol" \
                 --proc "${VYLE_CONFIGURATION_CORE}" \
                 --no-atomic \
